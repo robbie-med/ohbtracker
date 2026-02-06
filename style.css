@@ -8,6 +8,7 @@
   --border: #333; --shadow: rgba(0,0,0,0.5);
   --card-bg: #1e1e1e; --modal-bg: #1a1a1a;
   --radius: 12px; --radius-sm: 8px;
+  --bili-glow: #3498db;
 }
 
 [data-theme="light"] {
@@ -16,6 +17,7 @@
   --green: #27ae60; --yellow: #f39c12; --red: #c0392b;
   --border: #d0d0d0; --shadow: rgba(0,0,0,0.15);
   --card-bg: #fff; --modal-bg: #fff;
+  --bili-glow: #5dade2;
 }
 
 html { font-size: 16px; }
@@ -65,13 +67,24 @@ body {
 .room-card {
   background: var(--card-bg); border: 2px solid var(--border);
   border-radius: var(--radius); padding: 0.5rem;
-  cursor: pointer; position: relative; transition: border-color 0.15s, transform 0.1s;
+  cursor: pointer; position: relative; transition: border-color 0.15s, transform 0.1s, box-shadow 0.2s;
   display: flex; flex-direction: column; min-height: 120px;
 }
 .room-card:active { transform: scale(0.97); }
 .room-card.status-green { border-color: var(--green); }
 .room-card.status-yellow { border-color: var(--yellow); }
 .room-card.status-red { border-color: var(--red); }
+
+/* Bili lights blue glow */
+.room-card.bili-glow {
+  box-shadow: 0 0 12px 4px var(--bili-glow), inset 0 0 8px 1px rgba(52,152,219,0.15);
+  border-color: var(--bili-glow);
+}
+@keyframes biliPulse {
+  0%,100% { box-shadow: 0 0 12px 4px var(--bili-glow), inset 0 0 8px 1px rgba(52,152,219,0.15); }
+  50% { box-shadow: 0 0 20px 8px var(--bili-glow), inset 0 0 12px 2px rgba(52,152,219,0.25); }
+}
+.room-card.bili-glow { animation: biliPulse 2s ease-in-out infinite; }
 
 .room-card .card-top {
   display: flex; justify-content: space-between; align-items: flex-start;
@@ -96,6 +109,17 @@ body {
   display: flex; flex-wrap: wrap; gap: 0.15rem;
   margin-top: 0.2rem; font-size: 0.65rem;
 }
+
+/* Newborn screen mini line on card */
+.room-card .card-screen {
+  display: flex; flex-wrap: wrap; gap: 0.15rem 0.3rem;
+  margin-top: 0.15rem; font-size: 0.55rem; color: var(--fg2);
+  font-weight: 600; letter-spacing: 0.2px;
+}
+.screen-pass { color: var(--green); }
+.screen-fail { color: var(--red); font-weight: 800; }
+.screen-pending { color: var(--fg2); opacity: 0.5; }
+
 .badge {
   display: inline-block; padding: 0.1rem 0.3rem; border-radius: 4px;
   font-weight: 600; font-size: 0.6rem; letter-spacing: 0.3px;
@@ -107,7 +131,8 @@ body {
 .badge-delivered { background: var(--green); color: #fff; }
 .badge-alert { background: var(--red); color: #fff; animation: pulse 1.5s infinite; }
 .badge-cbc { background: #d35400; color: #fff; }
-.badge-24hr { background: #8e44ad; color: #fff; }
+.badge-gbs { background: #c0392b; color: #fff; }
+.badge-bili { background: #2471a3; color: #fff; }
 
 .card-alert-dot {
   position: absolute; top: 4px; right: 4px;
@@ -256,6 +281,20 @@ fieldset legend { font-size: 0.75rem; font-weight: 600; color: var(--fg2); paddi
 }
 .checklist-item input { accent-color: var(--accent); }
 .checklist-item.checked label { text-decoration: line-through; opacity: 0.5; }
+
+/* Newborn screen grid in detail */
+.screen-grid {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 0.2rem 0.4rem;
+  align-items: center; font-size: 0.8rem;
+}
+.screen-grid .screen-label { font-weight: 600; }
+.screen-grid button {
+  padding: 0.25rem 0.5rem; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg3); color: var(--fg); font-size: 0.75rem;
+  cursor: pointer; min-width: 40px; text-align: center;
+}
+.screen-grid button.pass { background: var(--green); color: #fff; border-color: var(--green); }
+.screen-grid button.fail { background: var(--red); color: #fff; border-color: var(--red); }
 
 /* === Scrollbar === */
 ::-webkit-scrollbar { width: 4px; }
