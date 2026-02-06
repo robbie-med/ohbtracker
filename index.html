@@ -15,6 +15,7 @@
   <h1>OB Tracker</h1>
   <div class="topbar-actions">
     <button id="btn-theme" title="Toggle theme">🌙</button>
+    <button id="btn-data" title="Export / Import">📋</button>
     <button id="btn-add" title="Add patient">＋</button>
   </div>
 </header>
@@ -54,13 +55,19 @@
           <button type="button" class="toggle-btn" data-type="baby">👶 Baby</button>
         </div>
       </div>
-      <div class="form-row">
+      <!-- Mother: DOB is date only, Admitted is datetime -->
+      <div class="form-row" id="add-dob-row">
         <label>Date of Birth</label>
         <input type="date" id="add-dob">
       </div>
-      <div class="form-row">
+      <div class="form-row" id="add-admitted-row">
         <label>Admitted</label>
         <input type="datetime-local" id="add-admitted">
+      </div>
+      <!-- Baby: DOB is datetime (born time), no admit field -->
+      <div class="form-row" id="add-born-row" style="display:none">
+        <label>Born (Date/Time)</label>
+        <input type="datetime-local" id="add-born">
       </div>
       <div class="form-row">
         <label>Status</label>
@@ -72,6 +79,17 @@
       </div>
       <fieldset id="mother-fields">
         <legend>Mother Options</legend>
+        <div class="form-row">
+          <label>G / P</label>
+          <div style="display:flex;gap:0.4rem;">
+            <input type="text" id="add-gravida" placeholder="G" maxlength="5" style="width:50%;" autocomplete="off">
+            <input type="text" id="add-para" placeholder="P" maxlength="10" style="width:50%;" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>GA (weeks)</label>
+          <input type="text" id="add-ga" placeholder="e.g. 38+2" maxlength="10" autocomplete="off">
+        </div>
         <div class="form-row checkbox-row">
           <label><input type="checkbox" id="add-preeclamptic"> Preeclamptic (2hr mag checks)</label>
         </div>
@@ -96,11 +114,34 @@
           <label>EBL (mL)</label>
           <input type="number" id="add-ebl" min="0" inputmode="numeric">
         </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="add-gbs"> GBS +</label>
+        </div>
       </fieldset>
       <fieldset id="baby-fields" style="display:none">
         <legend>Baby Options</legend>
+        <div class="form-row">
+          <label>Birth Weight (g)</label>
+          <input type="number" id="add-weight" min="0" inputmode="numeric">
+        </div>
+        <div class="form-row">
+          <label>Feeding</label>
+          <select id="add-feeding">
+            <option value="">—</option>
+            <option value="breast">Breast</option>
+            <option value="bottle">Bottle</option>
+            <option value="combo">Combo</option>
+          </select>
+        </div>
         <div class="form-row checkbox-row">
           <label><input type="checkbox" id="add-nicu"> In NICU</label>
+        </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="add-bili-lights"> On Bili Lights</label>
+        </div>
+        <div class="form-row">
+          <label>Bili Level</label>
+          <input type="number" id="add-bili" min="0" step="0.1" inputmode="decimal">
         </div>
       </fieldset>
       <button type="submit" class="btn-primary">Add Patient</button>
@@ -143,13 +184,17 @@
           <button type="button" class="toggle-btn" data-type="baby">👶 Baby</button>
         </div>
       </div>
-      <div class="form-row">
+      <div class="form-row" id="edit-dob-row">
         <label>Date of Birth</label>
         <input type="date" id="edit-dob">
       </div>
-      <div class="form-row">
+      <div class="form-row" id="edit-admitted-row">
         <label>Admitted</label>
         <input type="datetime-local" id="edit-admitted">
+      </div>
+      <div class="form-row" id="edit-born-row" style="display:none">
+        <label>Born (Date/Time)</label>
+        <input type="datetime-local" id="edit-born">
       </div>
       <div class="form-row">
         <label>Status</label>
@@ -161,6 +206,17 @@
       </div>
       <fieldset id="edit-mother-fields">
         <legend>Mother Options</legend>
+        <div class="form-row">
+          <label>G / P</label>
+          <div style="display:flex;gap:0.4rem;">
+            <input type="text" id="edit-gravida" placeholder="G" maxlength="5" style="width:50%;" autocomplete="off">
+            <input type="text" id="edit-para" placeholder="P" maxlength="10" style="width:50%;" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>GA (weeks)</label>
+          <input type="text" id="edit-ga" placeholder="e.g. 38+2" maxlength="10" autocomplete="off">
+        </div>
         <div class="form-row checkbox-row">
           <label><input type="checkbox" id="edit-preeclamptic"> Preeclamptic (2hr mag checks)</label>
         </div>
@@ -193,11 +249,34 @@
           <label>EBL (mL)</label>
           <input type="number" id="edit-ebl" min="0" inputmode="numeric">
         </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="edit-gbs"> GBS +</label>
+        </div>
       </fieldset>
       <fieldset id="edit-baby-fields" style="display:none">
         <legend>Baby Options</legend>
+        <div class="form-row">
+          <label>Birth Weight (g)</label>
+          <input type="number" id="edit-weight" min="0" inputmode="numeric">
+        </div>
+        <div class="form-row">
+          <label>Feeding</label>
+          <select id="edit-feeding">
+            <option value="">—</option>
+            <option value="breast">Breast</option>
+            <option value="bottle">Bottle</option>
+            <option value="combo">Combo</option>
+          </select>
+        </div>
         <div class="form-row checkbox-row">
           <label><input type="checkbox" id="edit-nicu"> In NICU</label>
+        </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="edit-bili-lights"> On Bili Lights</label>
+        </div>
+        <div class="form-row">
+          <label>Bili Level</label>
+          <input type="number" id="edit-bili" min="0" step="0.1" inputmode="decimal">
         </div>
       </fieldset>
       <div class="form-actions">
@@ -225,7 +304,7 @@
           <option value="mag_check">💊 Mag Check (q2h)</option>
           <option value="labor_note">📝 Labor Note (q4h)</option>
           <option value="cbc">🧪 CBC Check</option>
-          <option value="baby_24hr">👶 24hr Check</option>
+          <option value="glucose">🍬 Glucose Check</option>
         </select>
       </div>
       <div class="form-row" id="custom-label-row">
@@ -244,6 +323,36 @@
       <button type="submit" class="btn-primary">Add Alert</button>
     </form>
     <div id="alert-list" class="alert-list"></div>
+  </div>
+</div>
+
+<!-- Export / Import Modal -->
+<div id="modal-data" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Export / Import</h2>
+      <button class="modal-close" data-close="modal-data">✕</button>
+    </div>
+    <div class="detail-section">
+      <h3>Export</h3>
+      <p style="font-size:0.8rem;color:var(--fg2);margin-bottom:0.4rem;">Download all patient data as a JSON file, or copy it to your clipboard.</p>
+      <div class="detail-actions">
+        <button class="btn-secondary" id="btn-export-file">💾 Download File</button>
+        <button class="btn-secondary" id="btn-export-copy">📋 Copy to Clipboard</button>
+      </div>
+    </div>
+    <div class="detail-section" style="margin-top:1rem;">
+      <h3>Import</h3>
+      <p style="font-size:0.8rem;color:var(--fg2);margin-bottom:0.4rem;">Load a previously exported JSON file. You can merge with existing data or replace it entirely.</p>
+      <input type="file" id="import-file" accept=".json,application/json" style="margin-bottom:0.5rem;">
+      <div class="toggle-group" style="margin-bottom:0.5rem;">
+        <button type="button" class="toggle-btn active" id="import-mode-merge" data-import="merge">Merge</button>
+        <button type="button" class="toggle-btn" id="import-mode-replace" data-import="replace">Replace</button>
+      </div>
+      <small style="color:var(--fg2);display:block;margin-bottom:0.5rem;">Merge = add new patients, skip duplicates. Replace = overwrite everything.</small>
+      <button class="btn-primary" id="btn-import">Import</button>
+      <div id="import-status" style="margin-top:0.4rem;font-size:0.8rem;"></div>
+    </div>
   </div>
 </div>
 

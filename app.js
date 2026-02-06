@@ -65,6 +65,11 @@
     return local.toISOString().slice(0, 10);
   }
 
+  // For babies: get the time reference (born time, which is their DOB datetime)
+  function babyTimeRef(p) {
+    return p.born || p.admitted; // fallback to admitted for legacy data
+  }
+
   // --- Alert Engine ---
   function getAlertsDue() {
     const patients = loadPatients();
@@ -80,9 +85,7 @@
           const elapsed = n - start;
           if (elapsed >= 0) {
             const cycles = Math.floor(elapsed / interval);
-            const nextDue = start + (cycles + 1) * interval;
             const lastDue = start + cycles * interval;
-            // Alert is "due" if we're within 15 min of a cycle
             if (n >= lastDue && n < lastDue + 900000) {
               due.push({ patient: p, alert: a, dueAt: new Date(lastDue) });
             }
@@ -141,13 +144,11 @@
     });
   }
 
-  // Auto-generate default alerts for a patient
   function generateDefaultAlerts(patient) {
     const alerts = patient.alerts || [];
     const nowStr = toLocalInput(now());
 
     if (patient.type === 'mother') {
-      // CBC check morning after delivery
       if (patient.delivered && patient.deliveryTime) {
         const deliveryDate = new Date(patient.deliveryTime);
         const nextMorning = new Date(deliveryDate);
@@ -160,7 +161,6 @@
           });
         }
       }
-      // Mag checks q2h
       if (patient.preeclamptic) {
         if (!alerts.find(a => a.autoType === 'mag_check')) {
           alerts.push({
@@ -169,11 +169,9 @@
           });
         }
       } else {
-        // Remove auto mag alerts if no longer preeclamptic
         const idx = alerts.findIndex(a => a.autoType === 'mag_check');
         if (idx !== -1) alerts.splice(idx, 1);
       }
-      // Labor notes q4h
       if (patient.labor) {
         if (!alerts.find(a => a.autoType === 'labor_note')) {
           alerts.push({
@@ -188,18 +186,41 @@
     }
 
     if (patient.type === 'baby') {
-      // 24hr check
-      if (patient.admitted && !alerts.find(a => a.autoType === 'baby_24hr')) {
-        const admitTime = new Date(patient.admitted);
-        const check24 = new Date(admitTime.getTime() + 24 * 3600000);
+      const ref = babyTimeRef(patient);
+      if (ref && !alerts.find(a => a.autoType === 'baby_24hr')) {
+        const bornTime = new Date(ref);
+        const check24 = new Date(bornTime.getTime() + 24 * 3600000);
         alerts.push({
-          id: crypto.randomUUID(), label: '👶 24hr Check', autoType: 'baby_24hr',
+          id: crypto.randomUUID(), label: '👶 24hr Screen', autoType: 'baby_24hr',
           start: toLocalInput(check24), repeatHours: 0, dismissed: false
         });
       }
     }
 
     return alerts;
+  }
+
+  // --- Newborn Screen ---
+  // screen: { hearingR: null|'pass'|'fail', hearingL: null|'pass'|'fail', cardiac: null|'pass'|'fail' }
+  function getScreen(p) {
+    return p.screen || { hearingR: null, hearingL: null, cardiac: null };
+  }
+
+  function screenSummaryHtml(p) {
+    const s = getScreen(p);
+    function cls(v) {
+      if (v === 'pass') return 'screen-pass';
+      if (v === 'fail') return 'screen-fail';
+      return 'screen-pending';
+    }
+    function txt(v) {
+      if (v === 'pass') return '✓';
+      if (v === 'fail') return '✗';
+      return '·';
+    }
+    return `<span class="${cls(s.hearingR)}">HR:${txt(s.hearingR)}</span>` +
+           `<span class="${cls(s.hearingL)}">HL:${txt(s.hearingL)}</span>` +
+           `<span class="${cls(s.cardiac)}">♡:${txt(s.cardiac)}</span>`;
   }
 
   // --- Theme ---
@@ -219,13 +240,49 @@
     document.getElementById('btn-theme').textContent = theme === 'dark' ? '☀️' : '🌙';
   }
 
+  // --- Notifications ---
+  let notifPermission = Notification ? Notification.permission : 'denied';
+
+  function requestNotifPermission() {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().then(p => { notifPermission = p; });
+    }
+  }
+
+  function sendNotification(title, body) {
+    // Browser notification (works on phone if site is added to home screen or tab is open)
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        const n = new Notification(title, {
+          body: body,
+          icon: '🏥',
+          tag: 'ob-alert-' + Date.now(),
+          requireInteraction: true,
+          vibrate: [200, 100, 200, 100, 200]
+        });
+        n.onclick = () => { window.focus(); n.close(); };
+      } catch (e) {
+        // Safari doesn't support Notification constructor in some contexts
+        if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+          navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification(title, { body: body, vibrate: [200, 100, 200, 100, 200] });
+          });
+        }
+      }
+    }
+    // Vibrate as fallback
+    if (navigator.vibrate) {
+      navigator.vibrate([200, 100, 200, 100, 200]);
+    }
+  }
+
   // --- Rendering ---
   function render() {
     const patients = loadPatients();
     const grid = document.getElementById('room-grid');
     const empty = document.getElementById('empty-state');
 
-    // Sort by room number
     patients.sort((a, b) => {
       const na = parseInt(a.room) || 0, nb = parseInt(b.room) || 0;
       return na - nb || a.room.localeCompare(b.room);
@@ -243,37 +300,53 @@
       const icon = isMother ? '🤰' : '👶';
       const statusClass = `status-${p.status || 'green'}`;
       const alertActive = hasActiveAlerts(p);
+      const biliGlow = !isMother && p.biliLights ? 'bili-glow' : '';
 
       let stats = '';
       if (isMother) {
         const mn = midnightsSince(p.admitted);
         stats += `<span>🌙${mn}</span>`;
+        if (p.ga) stats += `<span>📅${esc(p.ga)}w</span>`;
         if (p.csection && p.csectionDate) {
           const pod = postOpDays(p.csectionDate);
           if (pod !== null) stats += `<span>🔪POD${pod}</span>`;
         }
         if (p.ebl) stats += `<span>🩸${p.ebl}</span>`;
       } else {
-        const hrs = hoursSince(p.admitted);
+        const ref = babyTimeRef(p);
+        const hrs = hoursSince(ref);
         stats += `<span>⏱${hrs}h</span>`;
+        if (p.weight) stats += `<span>⚖${p.weight}g</span>`;
+        if (p.feeding) {
+          const feedIcon = { breast: '🤱', bottle: '🍼', combo: '🤱🍼' };
+          stats += `<span>${feedIcon[p.feeding] || p.feeding}</span>`;
+        }
+        if (p.bili) stats += `<span>🟡${p.bili}</span>`;
       }
 
       let badges = '';
       if (isMother) {
+        if (p.gravida || p.para) badges += `<span class="badge" style="background:var(--fg2);color:var(--bg)">G${esc(p.gravida || '?')}P${esc(p.para || '?')}</span>`;
         if (p.preeclamptic) badges += '<span class="badge badge-preec">MAG</span>';
         if (p.labor) badges += '<span class="badge badge-labor">LAB</span>';
         if (p.csection) badges += '<span class="badge badge-csec">C/S</span>';
         if (p.delivered) badges += '<span class="badge badge-delivered">DEL</span>';
-        // CBC check indicator
         if (p.delivered && !p.cbcDone) badges += '<span class="badge badge-cbc">CBC</span>';
+        if (p.gbs) badges += '<span class="badge badge-gbs">GBS+</span>';
       } else {
         if (p.nicu) badges += '<span class="badge badge-nicu">NICU</span>';
-        if (!p.check24Done && p.admitted) badges += '<span class="badge badge-24hr">24h</span>';
+        if (p.biliLights) badges += '<span class="badge badge-bili">BILI💡</span>';
       }
       if (alertActive) badges += '<span class="badge badge-alert">⚠️</span>';
 
+      // Newborn screen summary on card
+      let screenHtml = '';
+      if (!isMother) {
+        screenHtml = `<div class="card-screen">${screenSummaryHtml(p)}</div>`;
+      }
+
       return `
-        <div class="room-card ${statusClass}" data-id="${p.id}" onclick="window._openDetail('${p.id}')">
+        <div class="room-card ${statusClass} ${biliGlow}" data-id="${p.id}" onclick="window._openDetail('${p.id}')">
           ${alertActive ? '<div class="card-alert-dot"></div>' : ''}
           <div class="card-top">
             <span class="room-num">${esc(p.room)}</span>
@@ -282,6 +355,7 @@
           <div class="patient-name">${esc(p.name)}</div>
           <div class="card-stats">${stats}</div>
           <div class="card-badges">${badges}</div>
+          ${screenHtml}
         </div>`;
     }).join('');
 
@@ -325,6 +399,7 @@
       updateTypeUI();
       updateStatusUI();
       document.getElementById('add-admitted').value = toLocalInput();
+      document.getElementById('add-born').value = toLocalInput();
       document.getElementById('csection-date-row').style.display = 'none';
       document.getElementById('delivery-date-row').style.display = 'none';
       modal.classList.remove('hidden');
@@ -344,6 +419,10 @@
       typeGroup.forEach(b => b.classList.toggle('active', b.dataset.type === selectedType));
       document.getElementById('mother-fields').style.display = selectedType === 'mother' ? '' : 'none';
       document.getElementById('baby-fields').style.display = selectedType === 'baby' ? '' : 'none';
+      // Mother gets DOB (date) + Admitted (datetime); Baby gets Born (datetime)
+      document.getElementById('add-dob-row').style.display = selectedType === 'mother' ? '' : 'none';
+      document.getElementById('add-admitted-row').style.display = selectedType === 'mother' ? '' : 'none';
+      document.getElementById('add-born-row').style.display = selectedType === 'baby' ? '' : 'none';
     }
     function updateStatusUI() {
       statusGroup.forEach(b => b.classList.toggle('active', b.dataset.status === selectedStatus));
@@ -366,14 +445,16 @@
         name: document.getElementById('add-name').value.trim(),
         type: selectedType,
         status: selectedStatus,
-        dob: document.getElementById('add-dob').value,
-        admitted: document.getElementById('add-admitted').value,
         notes: '',
         alerts: [],
-        cbcDone: false,
-        check24Done: false
+        cbcDone: false
       };
       if (selectedType === 'mother') {
+        patient.dob = document.getElementById('add-dob').value;
+        patient.admitted = document.getElementById('add-admitted').value;
+        patient.gravida = document.getElementById('add-gravida').value.trim();
+        patient.para = document.getElementById('add-para').value.trim();
+        patient.ga = document.getElementById('add-ga').value.trim();
         patient.preeclamptic = document.getElementById('add-preeclamptic').checked;
         patient.labor = document.getElementById('add-labor').checked;
         patient.csection = document.getElementById('add-csection').checked;
@@ -381,10 +462,17 @@
         patient.delivered = document.getElementById('add-delivered').checked;
         patient.deliveryTime = document.getElementById('add-delivery-time').value;
         patient.ebl = document.getElementById('add-ebl').value;
+        patient.gbs = document.getElementById('add-gbs').checked;
         patient.magStart = '';
         patient.laborStart = '';
       } else {
+        patient.born = document.getElementById('add-born').value;
+        patient.weight = document.getElementById('add-weight').value;
+        patient.feeding = document.getElementById('add-feeding').value;
         patient.nicu = document.getElementById('add-nicu').checked;
+        patient.biliLights = document.getElementById('add-bili-lights').checked;
+        patient.bili = document.getElementById('add-bili').value;
+        patient.screen = { hearingR: null, hearingL: null, cardiac: null };
       }
       patient.alerts = generateDefaultAlerts(patient);
       const patients = loadPatients();
@@ -410,6 +498,12 @@
     let html = '<div class="detail-section"><h3>Info</h3><div class="detail-stats">';
     if (isMother) {
       html += `<div class="stat-box"><div class="stat-val">${midnightsSince(p.admitted)}</div><div class="stat-label">🌙 Midnights</div></div>`;
+      if (p.gravida || p.para) {
+        html += `<div class="stat-box"><div class="stat-val" style="font-size:1rem">G${esc(p.gravida || '?')}P${esc(p.para || '?')}</div><div class="stat-label">G/P</div></div>`;
+      }
+      if (p.ga) {
+        html += `<div class="stat-box"><div class="stat-val" style="font-size:1rem">${esc(p.ga)}</div><div class="stat-label">📅 GA wks</div></div>`;
+      }
       if (p.csection && p.csectionDate) {
         const pod = postOpDays(p.csectionDate);
         html += `<div class="stat-box"><div class="stat-val">${pod}</div><div class="stat-label">🔪 POD</div></div>`;
@@ -417,14 +511,55 @@
       if (p.ebl) {
         html += `<div class="stat-box"><div class="stat-val">${p.ebl}</div><div class="stat-label">🩸 EBL mL</div></div>`;
       }
+      if (p.dob) {
+        html += `<div class="stat-box"><div class="stat-val" style="font-size:0.9rem">${p.dob}</div><div class="stat-label">🎂 DOB</div></div>`;
+      }
+      html += `<div class="stat-box"><div class="stat-val" style="font-size:0.9rem">${formatTime(p.admitted)}</div><div class="stat-label">📥 Admitted</div></div>`;
+      if (p.gbs) {
+        html += `<div class="stat-box"><div class="stat-val" style="color:var(--red)">+</div><div class="stat-label">🦠 GBS</div></div>`;
+      }
     } else {
-      html += `<div class="stat-box"><div class="stat-val">${hoursSince(p.admitted)}</div><div class="stat-label">⏱ Hours</div></div>`;
+      const ref = babyTimeRef(p);
+      html += `<div class="stat-box"><div class="stat-val">${hoursSince(ref)}</div><div class="stat-label">⏱ Hours old</div></div>`;
+      if (p.weight) {
+        html += `<div class="stat-box"><div class="stat-val">${p.weight}</div><div class="stat-label">⚖ Weight g</div></div>`;
+      }
+      if (p.feeding) {
+        const feedLabels = { breast: 'Breast', bottle: 'Bottle', combo: 'Combo' };
+        html += `<div class="stat-box"><div class="stat-val" style="font-size:1rem">${feedLabels[p.feeding]}</div><div class="stat-label">🍼 Feeding</div></div>`;
+      }
+      if (ref) {
+        html += `<div class="stat-box"><div class="stat-val" style="font-size:0.9rem">${formatTime(ref)}</div><div class="stat-label">🎂 Born</div></div>`;
+      }
+      if (p.bili) {
+        html += `<div class="stat-box"><div class="stat-val" style="color:${parseFloat(p.bili) > 15 ? 'var(--red)' : 'var(--yellow)'}">${p.bili}</div><div class="stat-label">🟡 Bili</div></div>`;
+      }
+      if (p.biliLights) {
+        html += `<div class="stat-box"><div class="stat-val" style="color:var(--bili-glow)">ON</div><div class="stat-label">💡 Bili Lights</div></div>`;
+      }
+      if (p.nicu) {
+        html += `<div class="stat-box"><div class="stat-val" style="color:#8e44ad">NICU</div><div class="stat-label">📍 Location</div></div>`;
+      }
     }
-    if (p.dob) {
-      html += `<div class="stat-box"><div class="stat-val" style="font-size:0.9rem">${p.dob}</div><div class="stat-label">🎂 DOB</div></div>`;
-    }
-    html += `<div class="stat-box"><div class="stat-val" style="font-size:0.9rem">${formatTime(p.admitted)}</div><div class="stat-label">📥 Admitted</div></div>`;
     html += '</div></div>';
+
+    // Newborn screen (babies only)
+    if (!isMother) {
+      const s = getScreen(p);
+      html += '<div class="detail-section"><h3>Newborn Screen</h3><div class="screen-grid">';
+      const items = [
+        { key: 'hearingR', label: '👂 Hearing R' },
+        { key: 'hearingL', label: '👂 Hearing L' },
+        { key: 'cardiac', label: '♡ Cardiac' }
+      ];
+      items.forEach(item => {
+        const v = s[item.key];
+        html += `<span class="screen-label">${item.label}</span>`;
+        html += `<button class="${v === 'pass' ? 'pass' : ''}" onclick="window._setScreen('${id}','${item.key}','pass')">Pass</button>`;
+        html += `<button class="${v === 'fail' ? 'fail' : ''}" onclick="window._setScreen('${id}','${item.key}','fail')">Fail</button>`;
+      });
+      html += '</div></div>';
+    }
 
     // Checklists
     html += '<div class="detail-section"><h3>Checklists</h3>';
@@ -432,11 +567,6 @@
       html += `<div class="checklist-item ${p.cbcDone ? 'checked' : ''}">
         <input type="checkbox" ${p.cbcDone ? 'checked' : ''} onchange="window._toggleCbc('${id}', this.checked)">
         <label>🧪 Post-delivery CBC</label></div>`;
-    }
-    if (!isMother) {
-      html += `<div class="checklist-item ${p.check24Done ? 'checked' : ''}">
-        <input type="checkbox" ${p.check24Done ? 'checked' : ''} onchange="window._toggle24('${id}', this.checked)">
-        <label>👶 24-hour Check</label></div>`;
     }
     html += '</div>';
 
@@ -475,7 +605,18 @@
 
   window._saveNotes = function (id, val) { updatePatient(id, { notes: val }); };
   window._toggleCbc = function (id, val) { updatePatient(id, { cbcDone: val }); render(); };
-  window._toggle24 = function (id, val) { updatePatient(id, { check24Done: val }); render(); };
+
+  window._setScreen = function (id, key, val) {
+    const p = getPatient(id);
+    if (!p) return;
+    const screen = getScreen(p);
+    // Toggle: if already set to this value, clear it
+    screen[key] = screen[key] === val ? null : val;
+    updatePatient(id, { screen: screen });
+    openDetail(id); // refresh detail view
+    render();
+  };
+
   window._deletePatient = function (id) {
     deletePatient(id);
     document.getElementById('modal-detail').classList.add('hidden');
@@ -494,25 +635,57 @@
     document.getElementById('edit-id').value = id;
     document.getElementById('edit-room').value = p.room;
     document.getElementById('edit-name').value = p.name;
-    document.getElementById('edit-dob').value = p.dob || '';
-    document.getElementById('edit-admitted').value = p.admitted || '';
-    document.getElementById('edit-ebl').value = p.ebl || '';
 
     // Type
     let editType = p.type;
     const editTypeGroup = document.getElementById('edit-type-group').querySelectorAll('[data-type]');
     editTypeGroup.forEach(b => b.classList.toggle('active', b.dataset.type === editType));
-    document.getElementById('edit-mother-fields').style.display = isMother ? '' : 'none';
-    document.getElementById('edit-baby-fields').style.display = isMother ? 'none' : '';
+    showEditTypeFields(editType);
 
     editTypeGroup.forEach(btn => {
       btn.onclick = () => {
         editType = btn.dataset.type;
         editTypeGroup.forEach(b => b.classList.toggle('active', b.dataset.type === editType));
-        document.getElementById('edit-mother-fields').style.display = editType === 'mother' ? '' : 'none';
-        document.getElementById('edit-baby-fields').style.display = editType === 'baby' ? '' : 'none';
+        showEditTypeFields(editType);
       };
     });
+
+    function showEditTypeFields(type) {
+      document.getElementById('edit-mother-fields').style.display = type === 'mother' ? '' : 'none';
+      document.getElementById('edit-baby-fields').style.display = type === 'baby' ? '' : 'none';
+      document.getElementById('edit-dob-row').style.display = type === 'mother' ? '' : 'none';
+      document.getElementById('edit-admitted-row').style.display = type === 'mother' ? '' : 'none';
+      document.getElementById('edit-born-row').style.display = type === 'baby' ? '' : 'none';
+    }
+
+    // Mother fields
+    document.getElementById('edit-dob').value = p.dob || '';
+    document.getElementById('edit-admitted').value = p.admitted || '';
+    document.getElementById('edit-gravida').value = p.gravida || '';
+    document.getElementById('edit-para').value = p.para || '';
+    document.getElementById('edit-ga').value = p.ga || '';
+    document.getElementById('edit-ebl').value = p.ebl || '';
+    document.getElementById('edit-gbs').checked = p.gbs || false;
+    document.getElementById('edit-preeclamptic').checked = p.preeclamptic || false;
+    document.getElementById('edit-labor').checked = p.labor || false;
+    document.getElementById('edit-csection').checked = p.csection || false;
+    document.getElementById('edit-csection-date').value = p.csectionDate || '';
+    document.getElementById('edit-csection-date-row').style.display = p.csection ? '' : 'none';
+    document.getElementById('edit-delivered').checked = p.delivered || false;
+    document.getElementById('edit-delivery-time').value = p.deliveryTime || '';
+    document.getElementById('edit-delivery-date-row').style.display = p.delivered ? '' : 'none';
+    document.getElementById('edit-mag-start').value = p.magStart || '';
+    document.getElementById('edit-mag-start-row').style.display = p.preeclamptic ? '' : 'none';
+    document.getElementById('edit-labor-start').value = p.laborStart || '';
+    document.getElementById('edit-labor-start-row').style.display = p.labor ? '' : 'none';
+
+    // Baby fields
+    document.getElementById('edit-born').value = p.born || '';
+    document.getElementById('edit-weight').value = p.weight || '';
+    document.getElementById('edit-feeding').value = p.feeding || '';
+    document.getElementById('edit-nicu').checked = p.nicu || false;
+    document.getElementById('edit-bili-lights').checked = p.biliLights || false;
+    document.getElementById('edit-bili').value = p.bili || '';
 
     // Status
     let editStatus = p.status || 'green';
@@ -525,22 +698,7 @@
       };
     });
 
-    // Mother fields
-    document.getElementById('edit-preeclamptic').checked = p.preeclamptic || false;
-    document.getElementById('edit-labor').checked = p.labor || false;
-    document.getElementById('edit-csection').checked = p.csection || false;
-    document.getElementById('edit-csection-date').value = p.csectionDate || '';
-    document.getElementById('edit-csection-date-row').style.display = p.csection ? '' : 'none';
-    document.getElementById('edit-delivered').checked = p.delivered || false;
-    document.getElementById('edit-delivery-time').value = p.deliveryTime || '';
-    document.getElementById('edit-delivery-date-row').style.display = p.delivered ? '' : 'none';
-
-    // Mag/labor start times
-    document.getElementById('edit-mag-start').value = p.magStart || '';
-    document.getElementById('edit-mag-start-row').style.display = p.preeclamptic ? '' : 'none';
-    document.getElementById('edit-labor-start').value = p.laborStart || '';
-    document.getElementById('edit-labor-start-row').style.display = p.labor ? '' : 'none';
-
+    // Dynamic show/hide
     document.getElementById('edit-preeclamptic').onchange = e => {
       document.getElementById('edit-mag-start-row').style.display = e.target.checked ? '' : 'none';
       if (e.target.checked && !document.getElementById('edit-mag-start').value) {
@@ -566,9 +724,6 @@
       }
     };
 
-    // Baby fields
-    document.getElementById('edit-nicu').checked = p.nicu || false;
-
     // Delete button
     document.getElementById('btn-delete-patient').onclick = () => {
       if (confirm('Delete this patient?')) {
@@ -584,11 +739,14 @@
         room: document.getElementById('edit-room').value.trim(),
         name: document.getElementById('edit-name').value.trim(),
         type: editType,
-        status: editStatus,
-        dob: document.getElementById('edit-dob').value,
-        admitted: document.getElementById('edit-admitted').value
+        status: editStatus
       };
       if (editType === 'mother') {
+        changes.dob = document.getElementById('edit-dob').value;
+        changes.admitted = document.getElementById('edit-admitted').value;
+        changes.gravida = document.getElementById('edit-gravida').value.trim();
+        changes.para = document.getElementById('edit-para').value.trim();
+        changes.ga = document.getElementById('edit-ga').value.trim();
         changes.preeclamptic = document.getElementById('edit-preeclamptic').checked;
         changes.labor = document.getElementById('edit-labor').checked;
         changes.csection = document.getElementById('edit-csection').checked;
@@ -596,13 +754,18 @@
         changes.delivered = document.getElementById('edit-delivered').checked;
         changes.deliveryTime = document.getElementById('edit-delivery-time').value;
         changes.ebl = document.getElementById('edit-ebl').value;
+        changes.gbs = document.getElementById('edit-gbs').checked;
         changes.magStart = document.getElementById('edit-mag-start').value;
         changes.laborStart = document.getElementById('edit-labor-start').value;
       } else {
+        changes.born = document.getElementById('edit-born').value;
+        changes.weight = document.getElementById('edit-weight').value;
+        changes.feeding = document.getElementById('edit-feeding').value;
         changes.nicu = document.getElementById('edit-nicu').checked;
+        changes.biliLights = document.getElementById('edit-bili-lights').checked;
+        changes.bili = document.getElementById('edit-bili').value;
       }
       updatePatient(id, changes);
-      // Regenerate default alerts
       const updated = getPatient(id);
       updated.alerts = generateDefaultAlerts(updated);
       updatePatient(id, { alerts: updated.alerts });
@@ -695,7 +858,7 @@
           mag_check: { label: '💊 Mag Check', repeat: 2 },
           labor_note: { label: '📝 Labor Note', repeat: 4 },
           cbc: { label: '🧪 CBC Check', repeat: 0 },
-          baby_24hr: { label: '👶 24hr Check', repeat: 0 }
+          glucose: { label: '🍬 Glucose Check', repeat: 0 }
         };
         const preset = presets[v];
         if (preset) {
@@ -717,7 +880,7 @@
       if (!label) {
         const presets = {
           blood_draw: '🩸 Blood Draw', mag_check: '💊 Mag Check',
-          labor_note: '📝 Labor Note', cbc: '🧪 CBC Check', baby_24hr: '👶 24hr Check'
+          labor_note: '📝 Labor Note', cbc: '🧪 CBC Check', glucose: '🍬 Glucose Check'
         };
         label = presets[type] || 'Alert';
       }
@@ -736,7 +899,6 @@
       renderAlertList(patientId);
       render();
 
-      // Reset form
       typeSelect.value = 'custom';
       document.getElementById('alert-label').value = '';
       document.getElementById('alert-start').value = toLocalInput();
@@ -753,7 +915,6 @@
         document.getElementById(modalId).classList.add('hidden');
       });
     });
-    // Close on backdrop click
     document.querySelectorAll('.modal').forEach(modal => {
       modal.addEventListener('click', e => {
         if (e.target === modal) modal.classList.add('hidden');
@@ -775,16 +936,35 @@
   function startTicker() {
     setInterval(() => {
       render();
-    }, 30000); // Update every 30 seconds
+    }, 30000);
   }
 
-  // --- Notification Sound ---
+  // --- Notification Sound + Push ---
   let lastAlertCount = 0;
+  let lastAlertIds = new Set();
+
   function checkAlertSound() {
     const due = getAlertsDue();
-    if (due.length > lastAlertCount && lastAlertCount >= 0) {
+    const currentIds = new Set(due.map(d => d.alert.id + '-' + (d.dueAt ? d.dueAt.getTime() : '')));
+
+    // Find new alerts that weren't in the last check
+    const newAlerts = due.filter(d => {
+      const key = d.alert.id + '-' + (d.dueAt ? d.dueAt.getTime() : '');
+      return !lastAlertIds.has(key);
+    });
+
+    if (newAlerts.length > 0) {
       playAlertSound();
+      // Send phone notification for each new alert
+      newAlerts.forEach(d => {
+        sendNotification(
+          `🏥 Rm ${d.patient.room}: ${d.alert.label}`,
+          `${d.patient.name} - ${d.alert.label}`
+        );
+      });
     }
+
+    lastAlertIds = currentIds;
     lastAlertCount = due.length;
   }
 
@@ -801,7 +981,6 @@
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.5);
-      // Second beep
       const osc2 = ctx.createOscillator();
       const gain2 = ctx.createGain();
       osc2.connect(gain2);
@@ -815,6 +994,114 @@
     } catch (e) { /* ignore audio errors */ }
   }
 
+  // --- Export / Import ---
+  function setupDataModal() {
+    const modal = document.getElementById('modal-data');
+    document.getElementById('btn-data').addEventListener('click', () => {
+      document.getElementById('import-status').textContent = '';
+      document.getElementById('import-file').value = '';
+      modal.classList.remove('hidden');
+    });
+
+    const mergeBtn = document.getElementById('import-mode-merge');
+    const replaceBtn = document.getElementById('import-mode-replace');
+    let importMode = 'merge';
+    mergeBtn.addEventListener('click', () => {
+      importMode = 'merge';
+      mergeBtn.classList.add('active');
+      replaceBtn.classList.remove('active');
+    });
+    replaceBtn.addEventListener('click', () => {
+      importMode = 'replace';
+      replaceBtn.classList.add('active');
+      mergeBtn.classList.remove('active');
+    });
+
+    document.getElementById('btn-export-file').addEventListener('click', () => {
+      const patients = loadPatients();
+      const blob = new Blob([JSON.stringify(patients, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `ob-tracker-${date}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById('btn-export-copy').addEventListener('click', () => {
+      const patients = loadPatients();
+      const text = JSON.stringify(patients, null, 2);
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('btn-export-copy');
+        const orig = btn.textContent;
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        const btn = document.getElementById('btn-export-copy');
+        const orig = btn.textContent;
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      });
+    });
+
+    document.getElementById('btn-import').addEventListener('click', () => {
+      const status = document.getElementById('import-status');
+      const fileInput = document.getElementById('import-file');
+      const file = fileInput.files[0];
+      if (!file) {
+        status.textContent = '⚠️ Select a file first.';
+        status.style.color = 'var(--yellow)';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (!Array.isArray(imported)) throw new Error('Not a valid array');
+          if (importMode === 'replace') {
+            savePatients(imported);
+            status.textContent = `✅ Replaced with ${imported.length} patient(s).`;
+            status.style.color = 'var(--green)';
+          } else {
+            const existing = loadPatients();
+            const existingIds = new Set(existing.map(p => p.id));
+            let added = 0;
+            imported.forEach(p => {
+              if (!existingIds.has(p.id)) {
+                existing.push(p);
+                added++;
+              }
+            });
+            savePatients(existing);
+            status.textContent = `✅ Added ${added} new patient(s), skipped ${imported.length - added} duplicate(s).`;
+            status.style.color = 'var(--green)';
+          }
+          render();
+        } catch (err) {
+          status.textContent = '❌ Invalid file: ' + err.message;
+          status.style.color = 'var(--red)';
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  // --- Service Worker for background notifications ---
+  function registerSW() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  }
+
   // --- Init ---
   function init() {
     initTheme();
@@ -822,7 +1109,10 @@
     setupAddModal();
     setupAlertForm();
     setupAlertBanner();
+    setupDataModal();
     document.getElementById('btn-theme').addEventListener('click', toggleTheme);
+    requestNotifPermission();
+    registerSW();
     render();
     startTicker();
     setInterval(checkAlertSound, 15000);
