@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>OB Tracker</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Top Bar -->
+<header id="topbar">
+  <h1>OB Tracker</h1>
+  <div class="topbar-actions">
+    <button id="btn-theme" title="Toggle theme">🌙</button>
+    <button id="btn-add" title="Add patient">＋</button>
+  </div>
+</header>
+
+<!-- Alert Banner -->
+<div id="alert-banner" class="alert-banner hidden"></div>
+
+<!-- Room Grid -->
+<main id="room-grid" class="room-grid"></main>
+
+<!-- Empty State -->
+<div id="empty-state" class="empty-state">
+  <p>No patients yet</p>
+  <p class="subtle">Tap ＋ to add a patient</p>
+</div>
+
+<!-- Add Patient Modal -->
+<div id="modal-add" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Add Patient</h2>
+      <button class="modal-close" data-close="modal-add">✕</button>
+    </div>
+    <form id="form-add">
+      <div class="form-row">
+        <label>Room #</label>
+        <input type="text" id="add-room" required maxlength="10" inputmode="numeric" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label>Name</label>
+        <input type="text" id="add-name" required maxlength="40" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label>Type</label>
+        <div class="toggle-group">
+          <button type="button" class="toggle-btn active" data-type="mother">🤰 Mother</button>
+          <button type="button" class="toggle-btn" data-type="baby">👶 Baby</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Date of Birth</label>
+        <input type="date" id="add-dob">
+      </div>
+      <div class="form-row">
+        <label>Admitted</label>
+        <input type="datetime-local" id="add-admitted">
+      </div>
+      <div class="form-row">
+        <label>Status</label>
+        <div class="toggle-group">
+          <button type="button" class="toggle-btn status-btn active" data-status="green">🟢</button>
+          <button type="button" class="toggle-btn status-btn" data-status="yellow">🟡</button>
+          <button type="button" class="toggle-btn status-btn" data-status="red">🔴</button>
+        </div>
+      </div>
+      <fieldset id="mother-fields">
+        <legend>Mother Options</legend>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="add-preeclamptic"> Preeclamptic (2hr mag checks)</label>
+        </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="add-labor"> In Labor (4hr progress notes)</label>
+        </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="add-csection"> C-Section</label>
+        </div>
+        <div class="form-row" id="csection-date-row" style="display:none">
+          <label>C-Section Date</label>
+          <input type="date" id="add-csection-date">
+        </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="add-delivered"> Delivered</label>
+        </div>
+        <div class="form-row" id="delivery-date-row" style="display:none">
+          <label>Delivery Date/Time</label>
+          <input type="datetime-local" id="add-delivery-time">
+        </div>
+        <div class="form-row">
+          <label>EBL (mL)</label>
+          <input type="number" id="add-ebl" min="0" inputmode="numeric">
+        </div>
+      </fieldset>
+      <fieldset id="baby-fields" style="display:none">
+        <legend>Baby Options</legend>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="add-nicu"> In NICU</label>
+        </div>
+      </fieldset>
+      <button type="submit" class="btn-primary">Add Patient</button>
+    </form>
+  </div>
+</div>
+
+<!-- Patient Detail Modal -->
+<div id="modal-detail" class="modal hidden">
+  <div class="modal-content modal-detail-content">
+    <div class="modal-header">
+      <h2 id="detail-title">Room</h2>
+      <button class="modal-close" data-close="modal-detail">✕</button>
+    </div>
+    <div id="detail-body"></div>
+  </div>
+</div>
+
+<!-- Edit Patient Modal -->
+<div id="modal-edit" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Edit Patient</h2>
+      <button class="modal-close" data-close="modal-edit">✕</button>
+    </div>
+    <form id="form-edit">
+      <input type="hidden" id="edit-id">
+      <div class="form-row">
+        <label>Room #</label>
+        <input type="text" id="edit-room" required maxlength="10" inputmode="numeric" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label>Name</label>
+        <input type="text" id="edit-name" required maxlength="40" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label>Type</label>
+        <div class="toggle-group" id="edit-type-group">
+          <button type="button" class="toggle-btn active" data-type="mother">🤰 Mother</button>
+          <button type="button" class="toggle-btn" data-type="baby">👶 Baby</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Date of Birth</label>
+        <input type="date" id="edit-dob">
+      </div>
+      <div class="form-row">
+        <label>Admitted</label>
+        <input type="datetime-local" id="edit-admitted">
+      </div>
+      <div class="form-row">
+        <label>Status</label>
+        <div class="toggle-group" id="edit-status-group">
+          <button type="button" class="toggle-btn status-btn active" data-status="green">🟢</button>
+          <button type="button" class="toggle-btn status-btn" data-status="yellow">🟡</button>
+          <button type="button" class="toggle-btn status-btn" data-status="red">🔴</button>
+        </div>
+      </div>
+      <fieldset id="edit-mother-fields">
+        <legend>Mother Options</legend>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="edit-preeclamptic"> Preeclamptic (2hr mag checks)</label>
+        </div>
+        <div class="form-row" id="edit-mag-start-row" style="display:none">
+          <label>Mag Start Time</label>
+          <input type="datetime-local" id="edit-mag-start">
+        </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="edit-labor"> In Labor (4hr progress notes)</label>
+        </div>
+        <div class="form-row" id="edit-labor-start-row" style="display:none">
+          <label>Labor Note Start Time</label>
+          <input type="datetime-local" id="edit-labor-start">
+        </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="edit-csection"> C-Section</label>
+        </div>
+        <div class="form-row" id="edit-csection-date-row" style="display:none">
+          <label>C-Section Date</label>
+          <input type="date" id="edit-csection-date">
+        </div>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="edit-delivered"> Delivered</label>
+        </div>
+        <div class="form-row" id="edit-delivery-date-row" style="display:none">
+          <label>Delivery Date/Time</label>
+          <input type="datetime-local" id="edit-delivery-time">
+        </div>
+        <div class="form-row">
+          <label>EBL (mL)</label>
+          <input type="number" id="edit-ebl" min="0" inputmode="numeric">
+        </div>
+      </fieldset>
+      <fieldset id="edit-baby-fields" style="display:none">
+        <legend>Baby Options</legend>
+        <div class="form-row checkbox-row">
+          <label><input type="checkbox" id="edit-nicu"> In NICU</label>
+        </div>
+      </fieldset>
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Save</button>
+        <button type="button" id="btn-delete-patient" class="btn-danger">Delete Patient</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Alerts Modal -->
+<div id="modal-alerts" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Manage Alerts</h2>
+      <button class="modal-close" data-close="modal-alerts">✕</button>
+    </div>
+    <form id="form-alert">
+      <input type="hidden" id="alert-patient-id">
+      <div class="form-row">
+        <label>Alert Type</label>
+        <select id="alert-type">
+          <option value="custom">Custom</option>
+          <option value="blood_draw">🩸 Blood Draw</option>
+          <option value="mag_check">💊 Mag Check (q2h)</option>
+          <option value="labor_note">📝 Labor Note (q4h)</option>
+          <option value="cbc">🧪 CBC Check</option>
+          <option value="baby_24hr">👶 24hr Check</option>
+        </select>
+      </div>
+      <div class="form-row" id="custom-label-row">
+        <label>Label</label>
+        <input type="text" id="alert-label" maxlength="30" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label>Start Time</label>
+        <input type="datetime-local" id="alert-start">
+      </div>
+      <div class="form-row">
+        <label>Repeat (hours)</label>
+        <input type="number" id="alert-repeat" min="0" step="0.5" value="0" inputmode="decimal">
+        <small>0 = one-time alert</small>
+      </div>
+      <button type="submit" class="btn-primary">Add Alert</button>
+    </form>
+    <div id="alert-list" class="alert-list"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
