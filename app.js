@@ -815,6 +815,113 @@
     } catch (e) { /* ignore audio errors */ }
   }
 
+  // --- Export / Import ---
+  function setupDataModal() {
+    const modal = document.getElementById('modal-data');
+    document.getElementById('btn-data').addEventListener('click', () => {
+      document.getElementById('import-status').textContent = '';
+      document.getElementById('import-file').value = '';
+      modal.classList.remove('hidden');
+    });
+
+    // Import mode toggle
+    const mergeBtn = document.getElementById('import-mode-merge');
+    const replaceBtn = document.getElementById('import-mode-replace');
+    let importMode = 'merge';
+    mergeBtn.addEventListener('click', () => {
+      importMode = 'merge';
+      mergeBtn.classList.add('active');
+      replaceBtn.classList.remove('active');
+    });
+    replaceBtn.addEventListener('click', () => {
+      importMode = 'replace';
+      replaceBtn.classList.add('active');
+      mergeBtn.classList.remove('active');
+    });
+
+    // Export as file download
+    document.getElementById('btn-export-file').addEventListener('click', () => {
+      const patients = loadPatients();
+      const blob = new Blob([JSON.stringify(patients, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `ob-tracker-${date}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    // Export to clipboard
+    document.getElementById('btn-export-copy').addEventListener('click', () => {
+      const patients = loadPatients();
+      const text = JSON.stringify(patients, null, 2);
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('btn-export-copy');
+        const orig = btn.textContent;
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      }).catch(() => {
+        // Fallback: select from a temp textarea
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        const btn = document.getElementById('btn-export-copy');
+        const orig = btn.textContent;
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      });
+    });
+
+    // Import
+    document.getElementById('btn-import').addEventListener('click', () => {
+      const status = document.getElementById('import-status');
+      const fileInput = document.getElementById('import-file');
+      const file = fileInput.files[0];
+      if (!file) {
+        status.textContent = '⚠️ Select a file first.';
+        status.style.color = 'var(--yellow)';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (!Array.isArray(imported)) throw new Error('Not a valid array');
+          if (importMode === 'replace') {
+            savePatients(imported);
+            status.textContent = `✅ Replaced with ${imported.length} patient(s).`;
+            status.style.color = 'var(--green)';
+          } else {
+            // Merge: add patients whose id doesn't already exist
+            const existing = loadPatients();
+            const existingIds = new Set(existing.map(p => p.id));
+            let added = 0;
+            imported.forEach(p => {
+              if (!existingIds.has(p.id)) {
+                existing.push(p);
+                added++;
+              }
+            });
+            savePatients(existing);
+            status.textContent = `✅ Added ${added} new patient(s), skipped ${imported.length - added} duplicate(s).`;
+            status.style.color = 'var(--green)';
+          }
+          render();
+        } catch (err) {
+          status.textContent = '❌ Invalid file: ' + err.message;
+          status.style.color = 'var(--red)';
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
+
   // --- Init ---
   function init() {
     initTheme();
@@ -822,6 +929,7 @@
     setupAddModal();
     setupAlertForm();
     setupAlertBanner();
+    setupDataModal();
     document.getElementById('btn-theme').addEventListener('click', toggleTheme);
     render();
     startTicker();

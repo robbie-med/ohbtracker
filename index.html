@@ -15,6 +15,7 @@
   <h1>OB Tracker</h1>
   <div class="topbar-actions">
     <button id="btn-theme" title="Toggle theme">🌙</button>
+    <button id="btn-data" title="Export / Import">📋</button>
     <button id="btn-add" title="Add patient">＋</button>
   </div>
 </header>
@@ -244,6 +245,36 @@
       <button type="submit" class="btn-primary">Add Alert</button>
     </form>
     <div id="alert-list" class="alert-list"></div>
+  </div>
+</div>
+
+<!-- Export / Import Modal -->
+<div id="modal-data" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Export / Import</h2>
+      <button class="modal-close" data-close="modal-data">✕</button>
+    </div>
+    <div class="detail-section">
+      <h3>Export</h3>
+      <p style="font-size:0.8rem;color:var(--fg2);margin-bottom:0.4rem;">Download all patient data as a JSON file, or copy it to your clipboard.</p>
+      <div class="detail-actions">
+        <button class="btn-secondary" id="btn-export-file">💾 Download File</button>
+        <button class="btn-secondary" id="btn-export-copy">📋 Copy to Clipboard</button>
+      </div>
+    </div>
+    <div class="detail-section" style="margin-top:1rem;">
+      <h3>Import</h3>
+      <p style="font-size:0.8rem;color:var(--fg2);margin-bottom:0.4rem;">Load a previously exported JSON file. You can merge with existing data or replace it entirely.</p>
+      <input type="file" id="import-file" accept=".json,application/json" style="margin-bottom:0.5rem;">
+      <div class="toggle-group" style="margin-bottom:0.5rem;">
+        <button type="button" class="toggle-btn active" id="import-mode-merge" data-import="merge">Merge</button>
+        <button type="button" class="toggle-btn" id="import-mode-replace" data-import="replace">Replace</button>
+      </div>
+      <small style="color:var(--fg2);display:block;margin-bottom:0.5rem;">Merge = add new patients, skip duplicates. Replace = overwrite everything.</small>
+      <button class="btn-primary" id="btn-import">Import</button>
+      <div id="import-status" style="margin-top:0.4rem;font-size:0.8rem;"></div>
+    </div>
   </div>
 </div>
 
